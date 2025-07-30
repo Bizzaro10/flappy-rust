@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use crate::{
     components::*,
+    // components::PressSpaceBarText,
     constants::{WINDOW_HEIGHT, WINDOW_WIDTH},
     utils::random_pipe_position,
 };
@@ -13,7 +14,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
         SpriteBundle {
             texture: asset_server.load("texture/background.png"),
             sprite: Sprite {
-                custom_size: Some(Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT)), // Adding a custom size
+                 custom_size: Some(Vec2::new(WINDOW_WIDTH + 288.0 * 2., WINDOW_HEIGHT)), // Adding a custom size
                 ..default() // Everything else is set to default
             },
             ..default()
@@ -30,7 +31,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
         SpriteBundle {
             texture: asset_server.load("texture/base.png"),
             sprite: Sprite {
-                custom_size: Some(Vec2::new(WINDOW_WIDTH, 112.)),
+                custom_size: Some(Vec2::new(WINDOW_WIDTH + 288. * 2., 112.)),
                 ..default()
             },
             transform: Transform::from_xyz(0., -250., 1.),
@@ -54,30 +55,52 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
         GameOverText,
     ));
        // Space Bar Text
-    commands.spawn((
+commands.spawn((
         SpriteBundle {
             texture: asset_server.load("texture/space.png"),
             transform: Transform::from_xyz(0.0, -50.0, 1.0),
             ..default()
         },
-        PressSpaceBarText,
+        PressSpaceBarText(Timer::from_seconds(0.5, TimerMode::Repeating)),
     ));
+
        let number_layout: TextureAtlasLayout =
         TextureAtlasLayout::from_grid(UVec2::new(24, 36), 1, 10, None, None);
     let number_texture_atlas_layout: Handle<TextureAtlasLayout> = texture_atlas_layouts.add(number_layout);
  
-    commands.spawn((
-        SpriteBundle {
-            texture: asset_server.load("texture/numbers.png"),
-            transform: Transform::from_xyz(-350., 200., 1.),
-            ..default()
-        },
-        TextureAtlas {
-            index: 0,
-            layout: number_texture_atlas_layout,
-        },
-        ScoreText,
-    ));
+    // Create three score digits
+    let digit_positions = [-350.0, -320.0, -290.0]; // Positions for each digit
+    for (_i, &x_pos) in digit_positions.iter().enumerate() {
+        commands.spawn((
+            SpriteBundle {
+                texture: asset_server.load("texture/numbers.png"),
+                transform: Transform::from_xyz(x_pos, 200.0, 1.0),
+                ..default()
+            },
+            TextureAtlas {
+                index: 0,
+                layout: number_texture_atlas_layout.clone(),
+            },
+            ScoreText,
+        ));
+    }
+    
+    // Create three high score digits (displayed below the regular score)
+    let high_score_digit_positions = [-350.0, -320.0, -290.0]; // Same x positions as regular score
+    for (_i, &x_pos) in high_score_digit_positions.iter().enumerate() {
+        commands.spawn((
+            SpriteBundle {
+                texture: asset_server.load("texture/numbers.png"),
+                transform: Transform::from_xyz(x_pos, 150.0, 1.0), // Different y position
+                ..default()
+            },
+            TextureAtlas {
+                index: 0,
+                layout: number_texture_atlas_layout.clone(),
+            },
+            HighScoreText,
+        ));
+    }
       // Spawn the bird
     commands.spawn((
         SpriteBundle {
@@ -95,7 +118,10 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
                 None,
             )),
         },
-        Bird,
+         Bird {
+        timer: Timer::from_seconds(0.2, TimerMode::Repeating),
+        velocity: 0.,
+    },
     ));
 //     // Spawn Lower Pipe
 // commands.spawn((
@@ -172,7 +198,8 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
             transform,
             ..default()
         },
-        UpperPipe,
+        UpperPipe{passed:false},
     ));
 }
+   
 }

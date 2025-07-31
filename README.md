@@ -1,1 +1,1 @@
-# flappy-rust
+# flappyBird-rust

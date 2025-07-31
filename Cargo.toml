@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.14", features = ["dynamic_linking"] }
 rand = "0.8"
-serde = { version = "1.0", features = ["derive"] }
  
 # Enable a small amount of optimization for release mode
 [profile.release]

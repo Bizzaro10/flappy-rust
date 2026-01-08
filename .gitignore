@@ -1,4 +1,6 @@
 /target
 .env
 *.txt
-error*.txt
+error_log_2.txt
+error_log.txt
+rules.md

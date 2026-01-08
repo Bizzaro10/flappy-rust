@@ -5,27 +5,36 @@ use crate::{
     constants::{WINDOW_HEIGHT, WINDOW_WIDTH},
     utils::random_pipe_position,
 };
-pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,) {
+use crate::nn::Net;
+use crate::resources::{SimulationState, GameMode};
+use crate::constants::NUM_BIRDS;
+
+pub fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    sim_state: Res<SimulationState>,
+) {
     // Spawn a 2D camera
     commands.spawn(Camera2dBundle::default());
 
-      // Spawn the background
-   commands.spawn((
+    // Spawn the background
+    commands.spawn((
         SpriteBundle {
             texture: asset_server.load("texture/background.png"),
             sprite: Sprite {
-                 custom_size: Some(Vec2::new(WINDOW_WIDTH + 288.0 * 2., WINDOW_HEIGHT)), // Adding a custom size
+                custom_size: Some(Vec2::new(WINDOW_WIDTH + 288.0 * 2., WINDOW_HEIGHT)), // Adding a custom size
                 ..default() // Everything else is set to default
             },
             ..default()
         },
-    ImageScaleMode::Tiled {
-        tile_x: true, // Only repeat on the x-axis
-        tile_y: false, // no repeat on the y-axis
-        stretch_value: 1., // no stretching
-    },
-    Background,
-));
+        ImageScaleMode::Tiled {
+            tile_x: true,  // Only repeat on the x-axis
+            tile_y: false, // no repeat on the y-axis
+            stretch_value: 1., // no stretching
+        },
+        Background,
+    ));
     // Spawn the Ground
     commands.spawn((
         SpriteBundle {
@@ -44,7 +53,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
         },
         Ground,
     ));
-      // Game Over Text
+    // Game Over Text
     commands.spawn((
         SpriteBundle {
             texture: asset_server.load("texture/game-over.png"),
@@ -54,8 +63,8 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>,mut texture_
         },
         GameOverText,
     ));
-       // Space Bar Text
-commands.spawn((
+    // Space Bar Text
+    commands.spawn((
         SpriteBundle {
             texture: asset_server.load("texture/space.png"),
             transform: Transform::from_xyz(0.0, -50.0, 1.0),
@@ -64,10 +73,11 @@ commands.spawn((
         PressSpaceBarText(Timer::from_seconds(0.5, TimerMode::Repeating)),
     ));
 
-       let number_layout: TextureAtlasLayout =
+    let number_layout: TextureAtlasLayout =
         TextureAtlasLayout::from_grid(UVec2::new(24, 36), 1, 10, None, None);
-    let number_texture_atlas_layout: Handle<TextureAtlasLayout> = texture_atlas_layouts.add(number_layout);
- 
+    let number_texture_atlas_layout: Handle<TextureAtlasLayout> =
+        texture_atlas_layouts.add(number_layout);
+
     // Create three score digits
     let digit_positions = [-350.0, -320.0, -290.0]; // Positions for each digit
     for (_i, &x_pos) in digit_positions.iter().enumerate() {
@@ -84,7 +94,7 @@ commands.spawn((
             ScoreText,
         ));
     }
-    
+
     // Create three high score digits (displayed below the regular score)
     let high_score_digit_positions = [-350.0, -320.0, -290.0]; // Same x positions as regular score
     for (_i, &x_pos) in high_score_digit_positions.iter().enumerate() {
@@ -101,28 +111,57 @@ commands.spawn((
             HighScoreText,
         ));
     }
-      // Spawn the bird
+
+    // Gen UI
     commands.spawn((
-        SpriteBundle {
-            texture: asset_server.load("texture/bird.png"),
-            transform: Transform::from_xyz(0., 0., 2.),
+        TextBundle::from_section(
+            "Gen: 1\nAlive: 0",
+            TextStyle {
+                font: asset_server.load("fonts/FlappyBird.ttf"), // Assuming font exists or default
+                font_size: 30.0,
+                color: Color::WHITE,
+            },
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(10.0),
+            left: Val::Px(10.0),
             ..default()
-        },
-        TextureAtlas {
-            index: 1,
-            layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
-                UVec2::new(34, 24),
-                3,
-                1,
-                None,
-                None,
-            )),
-        },
-         Bird {
-        timer: Timer::from_seconds(0.2, TimerMode::Repeating),
-        velocity: 0.,
-    },
+        }),
+        GenUi,
     ));
+
+
+    let bird_layout = texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(34, 24),
+        3,
+        1,
+        None,
+        None,
+    ));
+
+    let num_birds = if sim_state.mode == GameMode::AI { NUM_BIRDS } else { 1 };
+    
+    for _ in 0..num_birds {
+         commands.spawn((
+            SpriteBundle {
+                texture: asset_server.load("texture/bird.png"),
+                transform: Transform::from_xyz(0., 0., 2.),
+                ..default()
+            },
+            TextureAtlas {
+                index: 1,
+                layout: bird_layout.clone(),
+            },
+             Bird {
+                timer: Timer::from_seconds(0.2, TimerMode::Repeating),
+                velocity: 0.,
+                brain: if sim_state.mode == GameMode::AI { Some(Net::new(vec![5, 8, 1])) } else { None },
+                is_dead: false,
+                fitness: 0.0,
+            },
+        ));
+    }
 //     // Spawn Lower Pipe
 // commands.spawn((
 //     SpriteBundle {

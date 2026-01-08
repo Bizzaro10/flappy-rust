@@ -3,6 +3,11 @@ use crate::constants::*;
 use crate::resources::*;
 use crate::utils::*;
 use bevy::prelude::*;
+use rand::distributions::WeightedIndex;
+use rand::prelude::Distribution;
+use rand::thread_rng;
+use crate::nn::Net;
+use crate::constants::NUM_BIRDS;
 pub fn blink_space_bar_text(
     time: Res<Time>,
     mut query: Query<(&mut PressSpaceBarText, &mut Visibility)>,
@@ -118,8 +123,10 @@ pub fn gravity(
     mut game_over_query: Query<&mut Visibility, With<GameOverText>>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    sim_state: Res<SimulationState>,
 ) {
     for (mut bird, mut transform) in query.iter_mut() {
+        if bird.is_dead { continue; }
         let delta = time.delta().as_secs_f32();
         let gravity = 9.8;
         let delta_v = gravity * 150. * delta;
@@ -146,15 +153,23 @@ pub fn gravity(
             transform.translation.y = collision_point;
             bird.velocity = 0.0;
 
-            game.state = GameState::GameOver;
-            *game_over_query.single_mut() = Visibility::Visible;
+            if sim_state.mode == GameMode::Human {
+                game.state = GameState::GameOver;
+                *game_over_query.single_mut() = Visibility::Visible;
 
-            // play game over sound
-            commands.spawn(AudioBundle {
-                source: asset_server.load("audio/hit.ogg"),
-                settings: PlaybackSettings::DESPAWN,
-                ..default()
-            });
+                // play game over sound
+                commands.spawn(AudioBundle {
+                    source: asset_server.load("audio/hit.ogg"),
+                    settings: PlaybackSettings::DESPAWN,
+                    ..default()
+                });
+            } else {
+                 if !bird.is_dead {
+                    bird.is_dead = true;
+                    // Move bird way off screen so it's not visible
+                    transform.translation.y = -1000.0; 
+                }
+            }
         }
     }
 }
@@ -165,8 +180,10 @@ pub fn jump(
     mut query: Query<&mut Bird>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    sim_state: Res<SimulationState>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
 ) {
+    if sim_state.mode == GameMode::AI { return; }
     if !keyboard_input.just_pressed(KeyCode::Space) {
         return;
     }
@@ -178,6 +195,7 @@ pub fn jump(
     });
 
     for mut bird in query.iter_mut() {
+        if bird.is_dead { continue; }
         bird.velocity = 300.0;
     }
 }
@@ -186,11 +204,12 @@ pub fn pipes(
     time: Res<Time>,
     mut upper_pipe_query: Query<(&mut UpperPipe, &mut Transform)>,
     mut lower_pipe_query: Query<(&LowerPipe, &mut Transform), Without<UpperPipe>>,
-    mut bird_query: Query<&Transform, (With<Bird>, Without<LowerPipe>, Without<UpperPipe>)>,
+    mut bird_query: Query<(&mut Bird, &Transform), (With<Bird>, Without<LowerPipe>, Without<UpperPipe>)>,
     mut game_over_query: Query<&mut Visibility, With<GameOverText>>,
     asset_server: Res<AssetServer>,
     mut game: ResMut<Game>,
     mut commands: Commands,
+    sim_state: Res<SimulationState>,
 ) {
     let delta = time.delta().as_secs_f32();
     let delta_x = 150. * delta;
@@ -245,27 +264,41 @@ pub fn pipes(
         collision_x && collision_y
     };
 
-    for bird_transform in bird_query.iter_mut() {
-        let mut game_over = || {
-            game.state = GameState::GameOver;
-            *game_over_query.single_mut() = Visibility::Visible;
-
-            // Play game over sound
-            commands.spawn(AudioBundle {
-                source: asset_server.load("audio/hit.ogg"),
-                settings: PlaybackSettings::DESPAWN,
-            });
-        };
+    for (mut bird, bird_transform) in bird_query.iter_mut() {
+        if bird.is_dead { continue; }
+        
+        let mut collided = false;
 
         for (_, transform) in upper_pipe_query.iter_mut() {
             if is_collision(bird_transform, &transform) {
-                game_over();
+                collided = true;
+                break;
             }
         }
 
-        for (_, transform) in lower_pipe_query.iter_mut() {
-            if is_collision(bird_transform, &transform) {
-                game_over();
+        if !collided {
+            for (_, transform) in lower_pipe_query.iter_mut() {
+                if is_collision(bird_transform, &transform) {
+                    collided = true;
+                    break;
+                }
+            }
+        }
+
+        if collided {
+             if sim_state.mode == GameMode::Human {
+                game.state = GameState::GameOver;
+                *game_over_query.single_mut() = Visibility::Visible;
+
+                // Play game over sound
+                commands.spawn(AudioBundle {
+                    source: asset_server.load("audio/hit.ogg"),
+                    settings: PlaybackSettings::DESPAWN,
+                    ..default()
+                });
+            } else {
+                bird.is_dead = true;
+                // sim_state.birds_alive -= 1; // We can count this frame or rely on a query count
             }
         }
     }
@@ -277,6 +310,7 @@ pub fn score(
     mut upper_pipe_query: Query<(&mut UpperPipe, &Transform)>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    sim_state: Res<SimulationState>,
 ) {
     for (_, bird_transform) in bird_query.iter() {
         for (mut upper_pipe, transform) in upper_pipe_query.iter_mut() {
@@ -287,12 +321,24 @@ pub fn score(
                 game.score += 1;
                 upper_pipe.passed = true;
 
-                commands.spawn(AudioBundle {
-                    source: asset_server.load("audio/point.ogg"),
-                    settings: PlaybackSettings::DESPAWN,
-                });
+                if game.score % 10 == 0 { // Print less frequently
+                    println!("Score: {}", game.score);
+                }
 
-                println!("Score: {}", game.score);
+                // Play sound only in Human mode to avoid noise
+                // We don't have direct access to SimulationState here... 
+                // Wait, we need to add sim_state to arguments.
+                
+                // Let's modify the function signature first in a separate step or try to assume we added it.
+                // The tool call below this will add the argument.
+                // For now, I will modify the body assuming `sim_state` exists.
+                if sim_state.mode == GameMode::Human {
+                    commands.spawn(AudioBundle {
+                        source: asset_server.load("audio/point.ogg"),
+                        settings: PlaybackSettings::DESPAWN,
+                        ..default()
+                    });
+                }
             }
         }
     }
@@ -387,4 +433,242 @@ pub fn reset_game_after_game_over(
     }
 
     println!("Game reset! Starting fresh...");
+}
+
+pub fn bird_brain_system(
+    mut bird_query: Query<(&mut Bird, &Transform)>,
+    upper_pipe_query: Query<(&UpperPipe, &Transform)>,
+    lower_pipe_query: Query<(&LowerPipe, &Transform)>,
+    sim_state: Res<SimulationState>,
+) {
+    if sim_state.mode != GameMode::AI {
+        return;
+    }
+
+    let bird_x = 0.0;
+
+    let mut closest_pipe_dist = f32::MAX;
+    let mut closest_upper_pipe: Option<&Transform> = None;
+    let mut closest_lower_pipe: Option<&Transform> = None;
+
+    for (_upper_pipe, upper_transform) in upper_pipe_query.iter() {
+        let dist = upper_transform.translation.x - bird_x + 26.0; 
+        if dist > 0.0 && dist < closest_pipe_dist {
+            closest_pipe_dist = dist;
+            closest_upper_pipe = Some(upper_transform);
+        }
+    }
+    
+    if let Some(upper) = closest_upper_pipe {
+         for (_, lower_transform) in lower_pipe_query.iter() {
+             if (lower_transform.translation.x - upper.translation.x).abs() < 1.0 {
+                 closest_lower_pipe = Some(lower_transform);
+                 break;
+             }
+         }
+    }
+
+    for (mut bird, transform) in bird_query.iter_mut() {
+        if bird.is_dead { continue; }
+        
+        bird.fitness += 1.0;
+
+        if let (Some(upper), Some(lower)) = (closest_upper_pipe, closest_lower_pipe) {
+             if let Some(brain) = &bird.brain {
+                 let inputs = vec![
+                     (transform.translation.y + WINDOW_HEIGHT / 2.0) as f64 / WINDOW_HEIGHT as f64,
+                     (upper.translation.y - 160.0 + WINDOW_HEIGHT / 2.0) as f64 / WINDOW_HEIGHT as f64, // Top Pipe Bottom Edge 
+                     (lower.translation.y + 160.0 + WINDOW_HEIGHT / 2.0) as f64 / WINDOW_HEIGHT as f64, // Bottom Pipe Top Edge
+                     (upper.translation.x + WINDOW_WIDTH / 2.0) as f64 / WINDOW_WIDTH as f64,
+                     bird.velocity as f64 / 400.0,
+                 ];
+                 
+                 let output = brain.predict(&inputs)[0];
+                 if output > 0.5 {
+                     bird.velocity = 300.0;
+                 }
+             }
+        }
+    }
+}
+
+pub fn check_alive_and_next_gen(
+    mut bird_query: Query<(&mut Bird, &mut Transform)>,
+    mut upper_pipe_query: Query<(&mut Transform, &mut UpperPipe), (With<UpperPipe>, Without<Bird>)>,
+    mut lower_pipe_query: Query<&mut Transform, (With<LowerPipe>, Without<Bird>, Without<UpperPipe>)>,
+    mut sim_state: ResMut<SimulationState>,
+    mut game: ResMut<Game>,
+) {
+    if sim_state.mode != GameMode::AI {
+        return;
+    }
+
+    let alive_count = bird_query.iter().filter(|(b, _)| !b.is_dead).count();
+    sim_state.birds_alive = alive_count;
+
+    if alive_count == 0 {
+        println!("All birds dead. Evolving gen {} -> {}", sim_state.generation, sim_state.generation + 1);
+        
+        sim_state.generation += 1;
+        
+        let birds: Vec<(Net, f32)> = bird_query.iter()
+            .map(|(b, _)| (b.brain.clone().unwrap(), b.fitness))
+            .collect();
+            
+        let mut rng = thread_rng();
+        let mut new_brains = Vec::new();
+        
+        let weights: Vec<f32> = birds.iter().map(|(_, f)| *f).collect();
+        let dist = if weights.iter().sum::<f32>() == 0.0 {
+             WeightedIndex::new(vec![1.0; birds.len()]).unwrap()
+        } else {
+             WeightedIndex::new(weights).unwrap()
+        };
+
+        for _ in 0..NUM_BIRDS {
+            let parent_idx = dist.sample(&mut rng);
+            let mut parent_brain = birds[parent_idx].0.clone();
+            parent_brain.mutate();
+            new_brains.push(parent_brain);
+        }
+
+        for ((mut bird, mut transform), new_brain) in bird_query.iter_mut().zip(new_brains.into_iter()) {
+            bird.is_dead = false;
+            bird.velocity = 0.0;
+            bird.fitness = 0.0;
+            bird.brain = Some(new_brain);
+            transform.translation.y = 0.0;
+            transform.translation.x = 0.0; 
+            transform.rotation = Quat::IDENTITY;
+        }
+
+        // 4. Reset pipes
+        // Match upper and lower pipes by index to ensure they get the same random position
+        let mut upper_iter = upper_pipe_query.iter_mut();
+        let mut lower_iter = lower_pipe_query.iter_mut();
+        
+        let mut i = 0;
+        while let (Some((mut upper_transform, mut upper_pipe)), Some(mut lower_transform)) = (upper_iter.next(), lower_iter.next()) {
+             upper_pipe.passed = false;
+             let delta_x = i as f32 * 200.0 + 400.0;
+             
+             let (lower_y, upper_y) = random_pipe_position();
+             
+             upper_transform.translation.x = delta_x;
+             upper_transform.translation.y = upper_y;
+             
+             lower_transform.translation.x = delta_x;
+             lower_transform.translation.y = lower_y;
+             
+             i += 1;
+        }
+        
+        game.score = 0;
+    }
+}
+
+pub fn update_gen_ui(
+    sim_state: Res<SimulationState>,
+    mut query: Query<&mut Text, With<GenUi>>,
+) {
+    for mut text in query.iter_mut() {
+        if sim_state.mode == GameMode::AI {
+            text.sections[0].value = format!("Gen: {}\nAlive: {}", sim_state.generation, sim_state.birds_alive);
+            text.sections[0].style.color = Color::WHITE;
+        } else {
+             text.sections[0].value = "".to_string(); 
+        }
+    }
+}
+
+pub fn toggle_game_mode(
+    mut sim_state: ResMut<SimulationState>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+    bird_query: Query<Entity, With<Bird>>,
+    asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut game: ResMut<Game>,
+    mut upper_pipes: Query<&mut Transform, With<UpperPipe>>,
+    mut lower_pipes: Query<&mut Transform, (With<LowerPipe>, Without<UpperPipe>)>,
+) {
+     if keyboard_input.just_pressed(KeyCode::KeyM) {
+         for entity in bird_query.iter() {
+             commands.entity(entity).despawn();
+         }
+
+         let bird_layout = texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+            UVec2::new(34, 24),
+            3,
+            1,
+            None,
+            None,
+        ));
+
+         if sim_state.mode == GameMode::AI {
+             sim_state.mode = GameMode::Human;
+              commands.spawn((
+                SpriteBundle {
+                    texture: asset_server.load("texture/bird.png"),
+                    transform: Transform::from_xyz(0., 0., 2.),
+                    ..default()
+                },
+                TextureAtlas {
+                    index: 1,
+                    layout: bird_layout,
+                },
+                 Bird {
+                    timer: Timer::from_seconds(0.2, TimerMode::Repeating),
+                    velocity: 0.,
+                    brain: None, 
+                    is_dead: false,
+                    fitness: 0.0,
+                },
+            ));
+            game.score = 0;
+            // Reset pipes for human mode
+            let mut upper_iter = upper_pipes.iter_mut();
+            let mut lower_iter = lower_pipes.iter_mut();
+            let mut i = 0;
+            while let (Some(mut upper_transform), Some(mut lower_transform)) = (upper_iter.next(), lower_iter.next()) {
+                 let delta_x = i as f32 * 200.0 + 400.0;
+                 let (lower_y, upper_y) = random_pipe_position();
+                 
+                 upper_transform.translation.x = delta_x;
+                 upper_transform.translation.y = upper_y;
+                 
+                 lower_transform.translation.x = delta_x;
+                 lower_transform.translation.y = lower_y;
+                 i += 1;
+            }
+
+         } else {
+             sim_state.mode = GameMode::AI;
+             sim_state.generation = 1;
+             
+             for _ in 0..NUM_BIRDS {
+                commands.spawn((
+                    SpriteBundle {
+                        texture: asset_server.load("texture/bird.png"),
+                        transform: Transform::from_xyz(0., 0., 2.),
+                        ..default()
+                    },
+                    TextureAtlas {
+                        index: 1,
+                        layout: bird_layout.clone(),
+                    },
+                     Bird {
+                        timer: Timer::from_seconds(0.2, TimerMode::Repeating),
+                        velocity: 0.,
+                        brain: Some(Net::new(vec![5, 8, 1])), 
+                        is_dead: false,
+                        fitness: 0.0,
+                    },
+                ));
+            }
+         }
+         
+          game.state = GameState::Active; 
+          game.score = 0;
+     }
 }

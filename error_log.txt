@@ -1,0 +1,68 @@
+    Checking flappy-rust v0.1.0 (/home/boomazoid/flappy-rust)
+error[E0432]: unresolved import `crate::constants::NUM_BIRDS`
+  --> src/setup.rs:10:5
+   |
+10 | use crate::constants::NUM_BIRDS;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `NUM_BIRDS` in `constants`
+
+error[E0425]: cannot find value `keyboard_input` in this scope
+   --> src/systems.rs:185:9
+    |
+185 |     if !keyboard_input.just_pressed(KeyCode::Space) {
+    |         ^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `NUM_BIRDS` in this scope
+   --> src/systems.rs:511:21
+    |
+511 |         for _ in 0..NUM_BIRDS {
+    |                     ^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `NUM_BIRDS` in this scope
+   --> src/systems.rs:606:26
+    |
+606 |              for _ in 0..NUM_BIRDS {
+    |                          ^^^^^^^^^ not found in this scope
+
+error[E0063]: missing field `fitness` in initializer of `components::Bird`
+   --> src/setup.rs:156:14
+    |
+156 |              Bird {
+    |              ^^^^ missing `fitness`
+
+warning: variable does not need to be mutable
+   --> src/systems.rs:210:5
+    |
+210 |     mut sim_state: ResMut<SimulationState>,
+    |     ----^^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0502]: cannot borrow `bird` as immutable because it is also borrowed as mutable
+   --> src/systems.rs:292:13
+    |
+268 |         let mut handle_collision = || {
+    |                                    -- mutable borrow occurs here
+...
+280 |                 bird.is_dead = true;
+    |                 ---- first borrow occurs due to use of `bird` in closure
+...
+292 |         if !bird.is_dead {
+    |             ^^^^ immutable borrow occurs here
+...
+295 |                     handle_collision();
+    |                     ---------------- mutable borrow later used here
+
+warning: unused variable: `upper_pipe`
+   --> src/systems.rs:437:10
+    |
+437 |     for (upper_pipe, upper_transform) in upper_pipe_query.iter() {
+    |          ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_upper_pipe`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0063, E0425, E0432, E0502.
+For more information about an error, try `rustc --explain E0063`.
+warning: `flappy-rust` (bin "flappy-rust") generated 2 warnings
+error: could not compile `flappy-rust` (bin "flappy-rust") due to 6 previous errors; 2 warnings emitted

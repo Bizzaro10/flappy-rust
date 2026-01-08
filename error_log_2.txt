@@ -1,0 +1,50 @@
+    Checking flappy-rust v0.1.0 (/home/boomazoid/flappy-rust)
+error[E0425]: cannot find value `upper_pipes` in this scope
+   --> src/systems.rs:615:34
+    |
+615 |             let mut upper_iter = upper_pipes.iter_mut();
+    |                                  ^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `lower_pipes` in this scope
+   --> src/systems.rs:616:34
+    |
+616 |             let mut lower_iter = lower_pipes.iter_mut();
+    |                                  ^^^^^^^^^^^ not found in this scope
+
+warning: unused import: `crate::constants::NUM_BIRDS`
+ --> src/ui.rs:4:5
+  |
+4 | use crate::constants::NUM_BIRDS;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `upper_pipe`
+   --> src/systems.rs:441:10
+    |
+441 |     for (upper_pipe, upper_transform) in upper_pipe_query.iter() {
+    |          ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_upper_pipe`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/systems.rs:501:13
+    |
+501 |         let mut birds: Vec<(Net, f32)> = bird_query.iter()
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src/ui.rs:26:5
+   |
+26 |     mut sim_state: ResMut<SimulationState>,
+   |     ----^^^^^^^^^
+   |     |
+   |     help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0425`.
+warning: `flappy-rust` (bin "flappy-rust") generated 4 warnings
+error: could not compile `flappy-rust` (bin "flappy-rust") due to 2 previous errors; 4 warnings emitted

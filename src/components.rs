@@ -25,6 +25,9 @@ pub struct HighScoreText;
 pub struct Bird{
   pub timer: Timer,
   pub velocity: f32,
+  pub brain: Option<crate::nn::Net>,
+  pub is_dead: bool,
+  pub fitness: f32,
 }
 
 
@@ -35,6 +38,9 @@ pub struct UpperPipe{
  
 #[derive(Component)]
 pub struct LowerPipe;
+
+#[derive(Component)]
+pub struct GenUi;
 
 // #[derive(Component)]
 // pub struct PressSpaceBarTextt(pub Timer);

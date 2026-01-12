@@ -204,7 +204,7 @@ pub fn pipes(
     time: Res<Time>,
     mut upper_pipe_query: Query<(&mut UpperPipe, &mut Transform)>,
     mut lower_pipe_query: Query<(&LowerPipe, &mut Transform), Without<UpperPipe>>,
-    mut bird_query: Query<(&mut Bird, &Transform), (With<Bird>, Without<LowerPipe>, Without<UpperPipe>)>,
+    mut bird_query: Query<(&mut Bird, &mut Transform), (With<Bird>, Without<LowerPipe>, Without<UpperPipe>)>,
     mut game_over_query: Query<&mut Visibility, With<GameOverText>>,
     asset_server: Res<AssetServer>,
     mut game: ResMut<Game>,
@@ -264,13 +264,13 @@ pub fn pipes(
         collision_x && collision_y
     };
 
-    for (mut bird, bird_transform) in bird_query.iter_mut() {
+    for (mut bird, mut bird_transform) in bird_query.iter_mut() {
         if bird.is_dead { continue; }
         
         let mut collided = false;
 
         for (_, transform) in upper_pipe_query.iter_mut() {
-            if is_collision(bird_transform, &transform) {
+            if is_collision(&bird_transform, &transform) {
                 collided = true;
                 break;
             }
@@ -278,7 +278,7 @@ pub fn pipes(
 
         if !collided {
             for (_, transform) in lower_pipe_query.iter_mut() {
-                if is_collision(bird_transform, &transform) {
+                if is_collision(&bird_transform, &transform) {
                     collided = true;
                     break;
                 }
@@ -286,7 +286,7 @@ pub fn pipes(
         }
 
         if collided {
-             if sim_state.mode == GameMode::Human {
+            if sim_state.mode == GameMode::Human {
                 game.state = GameState::GameOver;
                 *game_over_query.single_mut() = Visibility::Visible;
 
@@ -298,7 +298,8 @@ pub fn pipes(
                 });
             } else {
                 bird.is_dead = true;
-                // sim_state.birds_alive -= 1; // We can count this frame or rely on a query count
+                // Move bird off screen so it doesn't form a vertical line
+                bird_transform.translation.y = -1000.0;
             }
         }
     }
@@ -445,20 +446,24 @@ pub fn bird_brain_system(
         return;
     }
 
-    let bird_x = 0.0;
+    let bird_x = 0.0; // Birds are fixed at x=0 visually, but logically they are at 0
 
     let mut closest_pipe_dist = f32::MAX;
     let mut closest_upper_pipe: Option<&Transform> = None;
     let mut closest_lower_pipe: Option<&Transform> = None;
 
+    // Find the next pipe
     for (_upper_pipe, upper_transform) in upper_pipe_query.iter() {
-        let dist = upper_transform.translation.x - bird_x + 26.0; 
+        // +26.0 accounts for bird/pipe width overlap roughly, ensuring we don't pick a pipe we are currently inside effectively "passed"
+        // Adjust logic if needed: we want the pipe that is strictly in front or currently intersecting
+        let dist = upper_transform.translation.x - bird_x + 52.0; // Pipe width is 52
         if dist > 0.0 && dist < closest_pipe_dist {
             closest_pipe_dist = dist;
             closest_upper_pipe = Some(upper_transform);
         }
     }
     
+    // Match lower pipe
     if let Some(upper) = closest_upper_pipe {
          for (_, lower_transform) in lower_pipe_query.iter() {
              if (lower_transform.translation.x - upper.translation.x).abs() < 1.0 {
@@ -475,12 +480,23 @@ pub fn bird_brain_system(
 
         if let (Some(upper), Some(lower)) = (closest_upper_pipe, closest_lower_pipe) {
              if let Some(brain) = &bird.brain {
+                //  inputs
+                // 1. Bird Y (normalized)
+                // 2. Dist to Gap Center Y (normalized)
+                // 3. Dist to Pipe X (normalized)
+                // 4. Velocity
+                
+                 let gap_center_y = (upper.translation.y + lower.translation.y) / 2.0;
+                 let bird_y = transform.translation.y;
+                 let dist_to_pipe_x = upper.translation.x; // bird is at 0
+                 
                  let inputs = vec![
-                     (transform.translation.y + WINDOW_HEIGHT / 2.0) as f64 / WINDOW_HEIGHT as f64,
-                     (upper.translation.y - 160.0 + WINDOW_HEIGHT / 2.0) as f64 / WINDOW_HEIGHT as f64, // Top Pipe Bottom Edge 
-                     (lower.translation.y + 160.0 + WINDOW_HEIGHT / 2.0) as f64 / WINDOW_HEIGHT as f64, // Bottom Pipe Top Edge
-                     (upper.translation.x + WINDOW_WIDTH / 2.0) as f64 / WINDOW_WIDTH as f64,
-                     bird.velocity as f64 / 400.0,
+                     map_range(bird_y as f64, -300.0, 300.0, 0.0, 1.0).clamp(0.0, 1.0),
+                     map_range(gap_center_y as f64, -300.0, 300.0, 0.0, 1.0).clamp(0.0, 1.0),
+                     map_range(dist_to_pipe_x as f64, 0.0, 500.0, 0.0, 1.0).clamp(0.0, 1.0),
+                     map_range(bird.velocity as f64, -500.0, 500.0, 0.0, 1.0).clamp(0.0, 1.0),
+                     // Extra input: difference
+                     map_range((bird_y - gap_center_y) as f64, -300.0, 300.0, 0.0, 1.0).clamp(0.0, 1.0),
                  ];
                  
                  let output = brain.predict(&inputs)[0];
@@ -490,6 +506,10 @@ pub fn bird_brain_system(
              }
         }
     }
+}
+
+fn map_range(val: f64, in_min: f64, in_max: f64, out_min: f64, out_max: f64) -> f64 {
+    (val - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 }
 
 pub fn check_alive_and_next_gen(
@@ -507,31 +527,57 @@ pub fn check_alive_and_next_gen(
     sim_state.birds_alive = alive_count;
 
     if alive_count == 0 {
-        println!("All birds dead. Evolving gen {} -> {}", sim_state.generation, sim_state.generation + 1);
-        
         sim_state.generation += 1;
         
-        let birds: Vec<(Net, f32)> = bird_query.iter()
+        // Collect all birds
+        let mut birds: Vec<(Net, f32)> = bird_query.iter()
             .map(|(b, _)| (b.brain.clone().unwrap(), b.fitness))
             .collect();
             
-        let mut rng = thread_rng();
+        // Sort by fitness descending
+        birds.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        println!("Evolving gen {} -> {}. Max Fitness: {}", sim_state.generation - 1, sim_state.generation, birds.first().map(|b| b.1).unwrap_or(0.0));
+
         let mut new_brains = Vec::new();
         
-        let weights: Vec<f32> = birds.iter().map(|(_, f)| *f).collect();
-        let dist = if weights.iter().sum::<f32>() == 0.0 {
-             WeightedIndex::new(vec![1.0; birds.len()]).unwrap()
-        } else {
-             WeightedIndex::new(weights).unwrap()
-        };
+        // Elitism: Keep top 2 best performing brains EXACTLY as they are
+        for i in 0..2 {
+            if i < birds.len() {
+                new_brains.push(birds[i].0.clone());
+            }
+        }
+        
+        // Generate the rest
+        let mut rng = thread_rng();
+        let remaining_slots = NUM_BIRDS - new_brains.len();
+        
+        // Selection: weighted by fitness, but favor top 50% significantly if possible?
+        // Standard weighted index is fine if weights are distinct enough.
+        // Let's square the fitness to exaggerate differences
+        let weights: Vec<f32> = birds.iter().map(|(_, f)| f.powf(2.0)).collect();
 
-        for _ in 0..NUM_BIRDS {
-            let parent_idx = dist.sample(&mut rng);
-            let mut parent_brain = birds[parent_idx].0.clone();
-            parent_brain.mutate();
-            new_brains.push(parent_brain);
+        if let Ok(dist) = WeightedIndex::new(weights) {
+             for _ in 0..remaining_slots {
+                let parent_idx = dist.sample(&mut rng);
+                let mut child_brain = birds[parent_idx].0.clone();
+                child_brain.mutate();
+                new_brains.push(child_brain);
+            }
+        } else {
+             // Fallback if all 0 fitness (shouldn't happen usually)
+             for _ in 0..remaining_slots {
+                 let mut child_brain = birds[0].0.clone(); // Just clone the first
+                 child_brain.mutate();
+                 new_brains.push(child_brain);
+             }
         }
 
+        // Assign new brains
+        // IMPORTANT: We must re-assign based on index or just refill. 
+        // Bevy query iteration order isn't guaranteed relative to our vector if we didn't track entities.
+        // But since we are replacing all of them, we can just zip.
+        
         for ((mut bird, mut transform), new_brain) in bird_query.iter_mut().zip(new_brains.into_iter()) {
             bird.is_dead = false;
             bird.velocity = 0.0;

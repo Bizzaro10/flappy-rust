@@ -12,8 +12,8 @@ struct Layer {
 }
 
 // Config constants
-const BRAIN_MUTATION_RATE: f64 = 0.02;
-const BRAIN_MUTATION_VARIATION: f64 = 0.2;
+const BRAIN_MUTATION_RATE: f64 = 0.1;
+const BRAIN_MUTATION_VARIATION: f64 = 0.5;
 
 impl Net {
     pub fn new(layer_sizes: Vec<usize>) -> Self {

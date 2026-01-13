@@ -307,13 +307,13 @@ pub fn pipes(
 
 pub fn score(
     mut game: ResMut<Game>,
-    bird_query: Query<(&Bird, &Transform)>,
+    mut bird_query: Query<(&mut Bird, &Transform)>,
     mut upper_pipe_query: Query<(&mut UpperPipe, &Transform)>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     sim_state: Res<SimulationState>,
 ) {
-    for (_, bird_transform) in bird_query.iter() {
+    for (mut bird, bird_transform) in bird_query.iter_mut() {
         for (mut upper_pipe, transform) in upper_pipe_query.iter_mut() {
             let passed = transform.translation.x < bird_transform.translation.x;
             let passed_state = upper_pipe.passed;
@@ -321,6 +321,9 @@ pub fn score(
             if passed && !passed_state {
                 game.score += 1;
                 upper_pipe.passed = true;
+                
+                // Reward fitness for passing a pipe
+                bird.fitness += 20.0;
 
                 if game.score % 10 == 0 { // Print less frequently
                     println!("Score: {}", game.score);
@@ -479,12 +482,11 @@ pub fn bird_brain_system(
         bird.fitness += 1.0;
 
         if let (Some(upper), Some(lower)) = (closest_upper_pipe, closest_lower_pipe) {
-             if let Some(brain) = &bird.brain {
-                //  inputs
-                // 1. Bird Y (normalized)
-                // 2. Dist to Gap Center Y (normalized)
-                // 3. Dist to Pipe X (normalized)
-                // 4. Velocity
+                 //  inputs
+                 // 1. Bird Y (normalized)
+                 // 2. Dist to Gap Center Y (normalized)
+                 // 3. Dist to Pipe X (normalized)
+                 // 4. Velocity
                 
                  let gap_center_y = (upper.translation.y + lower.translation.y) / 2.0;
                  let bird_y = transform.translation.y;
@@ -493,17 +495,37 @@ pub fn bird_brain_system(
                  let inputs = vec![
                      map_range(bird_y as f64, -300.0, 300.0, 0.0, 1.0).clamp(0.0, 1.0),
                      map_range(gap_center_y as f64, -300.0, 300.0, 0.0, 1.0).clamp(0.0, 1.0),
-                     map_range(dist_to_pipe_x as f64, 0.0, 500.0, 0.0, 1.0).clamp(0.0, 1.0),
-                     map_range(bird.velocity as f64, -500.0, 500.0, 0.0, 1.0).clamp(0.0, 1.0),
+                     // Expand range to -50.0 to account for when bird is crossing the pipe
+                     map_range(dist_to_pipe_x as f64, -50.0, 500.0, 0.0, 1.0).clamp(0.0, 1.0),
+                     // Expand range to -1000.0 to capture terminal velocity (falling fast)
+                     map_range(bird.velocity as f64, -1000.0, 500.0, 0.0, 1.0).clamp(0.0, 1.0),
                      // Extra input: difference
                      map_range((bird_y - gap_center_y) as f64, -300.0, 300.0, 0.0, 1.0).clamp(0.0, 1.0),
                  ];
                  
-                 let output = brain.predict(&inputs)[0];
-                 if output > 0.5 {
+                 // Precision Reward: Reward staying close to the center of the gap
+                 // Only apply when close to the pipe to encourage alignment
+                 let mut precision_bonus = 0.0;
+                 if dist_to_pipe_x < 100.0 && dist_to_pipe_x > -50.0 {
+                    let vertical_dist = (bird_y - gap_center_y).abs();
+                    // Bonus is higher when vertical_dist is small. 
+                    // Max bonus 0.5 per frame roughly
+                    if vertical_dist < 50.0 {
+                        precision_bonus = (50.0 - vertical_dist) / 50.0;
+                    }
+                 }
+                 
+                 let should_jump = if let Some(brain) = &bird.brain {
+                     brain.predict(&inputs)[0] > 0.5
+                 } else {
+                     false
+                 };
+
+                 bird.fitness += precision_bonus;
+                 
+                 if should_jump {
                      bird.velocity = 300.0;
                  }
-             }
         }
     }
 }
@@ -541,8 +563,8 @@ pub fn check_alive_and_next_gen(
 
         let mut new_brains = Vec::new();
         
-        // Elitism: Keep top 2 best performing brains EXACTLY as they are
-        for i in 0..2 {
+        // Elitism: Keep top 4 best performing brains EXACTLY as they are
+        for i in 0..4 {
             if i < birds.len() {
                 new_brains.push(birds[i].0.clone());
             }
